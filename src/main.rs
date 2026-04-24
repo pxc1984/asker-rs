@@ -2,168 +2,31 @@ use std::fs;
 use std::io::{self, Stdout};
 use std::path::{Path, PathBuf};
 
+use crate::r#const::DEFAULT_BANK_PATH;
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
+use card::Card;
+use clap::Parser;
+use cli::{Cli, Command};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::execute;
-use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
-use rand::seq::SliceRandom;
-use ratatui::Frame;
+use crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
+use deck::Deck;
+use exam_bank::ExamBank;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use serde::{Deserialize, Serialize};
+use session_action::SessionAction;
+use session_card::SessionCard;
+use session_state::SessionState;
 
-const DEFAULT_BANK_PATH: &str = "exam_bank.yaml";
-
-#[derive(Parser)]
-#[command(author, version, about = "Единый тренажер для подготовки к экзаменам")]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Command>,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    #[command(about = "Запустить тренировку по вопросам")]
-    Study {
-        #[arg(short, long, default_value = DEFAULT_BANK_PATH)]
-        bank: PathBuf,
-        #[arg(short, long)]
-        deck: Option<String>,
-    },
-    #[command(about = "Показать доступные колоды")]
-    List {
-        #[arg(short, long, default_value = DEFAULT_BANK_PATH)]
-        bank: PathBuf,
-    },
-    #[command(about = "Конвертировать старый формат вопросов в YAML")]
-    Convert {
-        #[arg(short, long)]
-        input: PathBuf,
-        #[arg(short, long, default_value = DEFAULT_BANK_PATH)]
-        output: PathBuf,
-        #[arg(short, long, default_value = "Подготовка к защите проекта")]
-        title: String,
-        #[arg(long, default_value = "obshchee")]
-        deck_id: String,
-        #[arg(long, default_value = "Общая")]
-        deck_name: String,
-    },
-    #[command(about = "Собрать бинарный файл")]
-    Build {
-        #[arg(long, default_value = "release", help = "Профиль сборки: debug или release")]
-        profile: String,
-    },
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct ExamBank {
-    title: String,
-    decks: Vec<Deck>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct Deck {
-    id: String,
-    name: String,
-    cards: Vec<Card>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct Card {
-    question: String,
-    answer: String,
-}
-
-#[derive(Debug, Clone)]
-struct SessionCard {
-    question: String,
-    answer: String,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum SessionAction {
-    Show,
-    Know,
-    DontKnow,
-    Quit,
-}
-
-#[derive(Debug)]
-struct SessionState {
-    queue: Vec<SessionCard>,
-    total: usize,
-    mastered: usize,
-    answer_shown: bool,
-    finished: bool,
-    aborted: bool,
-}
-
-impl SessionState {
-    fn new(mut cards: Vec<SessionCard>) -> Result<Self> {
-        if cards.is_empty() {
-            bail!("банк вопросов пуст");
-        }
-
-        let mut rng = rand::rng();
-        cards.shuffle(&mut rng);
-
-        let total = cards.len();
-        Ok(Self {
-            queue: cards,
-            total,
-            mastered: 0,
-            answer_shown: false,
-            finished: false,
-            aborted: false,
-        })
-    }
-
-    fn current(&self) -> Option<&SessionCard> {
-        self.queue.first()
-    }
-
-    fn remaining(&self) -> usize {
-        self.queue.len()
-    }
-
-    fn apply(&mut self, action: SessionAction) {
-        match action {
-            SessionAction::Show if !self.answer_shown => {
-                self.answer_shown = true;
-            }
-            SessionAction::Know => {
-                if !self.queue.is_empty() {
-                    self.queue.remove(0);
-                    self.mastered += 1;
-                    self.answer_shown = false;
-                }
-            }
-            SessionAction::DontKnow => {
-                if !self.queue.is_empty() {
-                    let card = self.queue.remove(0);
-                    self.queue.push(card);
-                    let mut rng = rand::rng();
-                    self.queue.shuffle(&mut rng);
-                    self.answer_shown = false;
-                }
-            }
-            SessionAction::Quit => {
-                self.aborted = true;
-                self.finished = true;
-            }
-            SessionAction::Show => {}
-        }
-
-        if self.queue.is_empty() {
-            self.finished = true;
-        }
-    }
-}
+mod card;
+mod cli;
+mod r#const;
+mod deck;
+mod drawing;
+mod exam_bank;
+mod session_action;
+mod session_card;
+mod session_state;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -181,31 +44,7 @@ fn main() -> Result<()> {
             deck_id,
             deck_name,
         } => run_convert(&input, &output, &title, &deck_id, &deck_name),
-        Command::Build { profile } => run_build(&profile),
     }
-}
-
-fn run_build(profile: &str) -> Result<()> {
-    let mut command = std::process::Command::new("cargo");
-    command.arg("build");
-    if profile == "release" {
-        command.arg("--release");
-    } else if profile != "debug" {
-        bail!("неподдерживаемый профиль '{profile}', используйте 'debug' или 'release'");
-    }
-
-    let status = command.status().context("не удалось запустить cargo build")?;
-    if !status.success() {
-        bail!("cargo build завершился с кодом {status}");
-    }
-
-    let binary = if profile == "release" {
-        "target/release/asker-rs"
-    } else {
-        "target/debug/asker-rs"
-    };
-    println!("Собран файл {binary}");
-    Ok(())
 }
 
 fn run_study(path: &Path, deck_id: Option<&str>) -> Result<()> {
@@ -231,12 +70,23 @@ fn run_list(path: &Path) -> Result<()> {
     let bank = load_bank(path)?;
     println!("{}", bank.title);
     for deck in &bank.decks {
-        println!("- {} ({}) [{} карточек]", deck.name, deck.id, deck.cards.len());
+        println!(
+            "- {} ({}) [{} карточек]",
+            deck.name,
+            deck.id,
+            deck.cards.len()
+        );
     }
     Ok(())
 }
 
-fn run_convert(input: &Path, output: &Path, title: &str, deck_id: &str, deck_name: &str) -> Result<()> {
+fn run_convert(
+    input: &Path,
+    output: &Path,
+    title: &str,
+    deck_id: &str,
+    deck_name: &str,
+) -> Result<()> {
     let content = fs::read_to_string(input)
         .with_context(|| format!("не удалось прочитать {}", input.display()))?;
     let cards = parse_legacy_cards(&content);
@@ -302,10 +152,16 @@ fn parse_legacy_cards(content: &str) -> Vec<Card> {
             }
 
             let question = lines[0]
-                .trim_start_matches(|ch: char| ch.is_ascii_digit() || ch == '.' || ch == '-' || ch.is_whitespace())
+                .trim_start_matches(|ch: char| {
+                    ch.is_ascii_digit() || ch == '.' || ch == '-' || ch.is_whitespace()
+                })
                 .trim()
                 .to_string();
-            let answer = lines[1..].join(" ").trim_start_matches("Ответ:").trim().to_string();
+            let answer = lines[1..]
+                .join(" ")
+                .trim_start_matches("Ответ:")
+                .trim()
+                .to_string();
 
             if question.is_empty() || answer.is_empty() {
                 None
@@ -325,7 +181,7 @@ fn run_tui(title: &str, deck_name: &str, state: &mut SessionState) -> Result<Str
     let mut terminal = Terminal::new(backend).context("не удалось инициализировать терминал")?;
 
     let result = session_loop(&mut terminal, title, deck_name, state);
-    restore_terminal(terminal)?;
+    drawing::restore_terminal(terminal)?;
 
     result
 }
@@ -337,13 +193,14 @@ fn session_loop(
     state: &mut SessionState,
 ) -> Result<String> {
     loop {
-        terminal.draw(|frame| draw_ui(frame, title, deck_name, state))?;
+        terminal.draw(|frame| drawing::draw_ui(frame, title, deck_name, state))?;
 
         if state.finished {
-            return Ok(summary_line(state));
+            return Ok(drawing::summary_line(state));
         }
 
-        if let Event::Key(key) = event::read().context("не удалось прочитать событие терминала")? {
+        if let Event::Key(key) = event::read().context("не удалось прочитать событие терминала")?
+        {
             if key.kind != KeyEventKind::Press {
                 continue;
             }
@@ -363,149 +220,5 @@ fn map_action(code: KeyCode, answer_shown: bool) -> Option<SessionAction> {
         KeyCode::Char('3') => Some(SessionAction::DontKnow),
         KeyCode::Char('q') | KeyCode::Esc => Some(SessionAction::Quit),
         _ => None,
-    }
-}
-
-fn draw_ui(frame: &mut Frame, title: &str, deck_name: &str, state: &SessionState) {
-    let area = frame.area();
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),
-            Constraint::Length(3),
-            Constraint::Min(8),
-            Constraint::Length(if state.answer_shown { 8 } else { 4 }),
-            Constraint::Length(3),
-        ])
-        .split(area);
-
-    let header = Paragraph::new(Text::from(vec![
-        Line::from(Span::styled(
-            title,
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            format!("Колода: {deck_name}"),
-            Style::default().fg(Color::Yellow),
-        )),
-        Line::from(vec![
-            Span::styled("1", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::raw(" показать ответ  "),
-            Span::styled("2", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw(" знаю  "),
-            Span::styled("3", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-            Span::raw(" не знаю  "),
-            Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw(" выход"),
-        ]),
-    ]))
-    .alignment(Alignment::Center)
-    .block(Block::default().borders(Borders::ALL).title("Тренажер").border_style(Style::default().fg(Color::Blue)));
-    frame.render_widget(header, layout[0]);
-
-    let progress = Paragraph::new(Line::from(vec![
-        Span::styled("Прогресс: ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(format!("{}/{}", state.mastered, state.total)),
-        Span::raw("    "),
-        Span::styled("Осталось в очереди: ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(state.remaining().to_string()),
-    ]))
-    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
-    frame.render_widget(progress, layout[1]);
-
-    let question = state
-        .current()
-        .map(|card| card.question.as_str())
-        .unwrap_or("Все вопросы пройдены.");
-    let question_widget = Paragraph::new(question)
-        .wrap(Wrap { trim: true })
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Вопрос")
-                .border_style(Style::default().fg(Color::Magenta)),
-        );
-    frame.render_widget(question_widget, layout[2]);
-
-    let answer_text = if state.answer_shown {
-        state.current().map(|card| card.answer.as_str()).unwrap_or("")
-    } else {
-        "Нажмите 1, чтобы показать ответ."
-    };
-    let answer_style = if state.answer_shown {
-        Style::default().fg(Color::Green)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let answer_widget = Paragraph::new(answer_text)
-        .style(answer_style)
-        .wrap(Wrap { trim: true })
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Ответ")
-                .border_style(Style::default().fg(Color::Green)),
-        );
-    frame.render_widget(answer_widget, layout[3]);
-
-    let footer_message = if state.finished {
-        summary_line(state)
-    } else if state.answer_shown {
-        "Нажмите 2, если теперь знаете ответ, 3 - если все еще не знаете, q - для выхода.".to_string()
-    } else {
-        "Нажмите 1, чтобы показать ответ, 2 - если знаете, 3 - если не знаете, q - для выхода.".to_string()
-    };
-    let footer = Paragraph::new(footer_message)
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Blue)));
-    frame.render_widget(footer, layout[4]);
-
-    if state.finished {
-        let popup_area = centered_rect(60, 20, area);
-        frame.render_widget(Clear, popup_area);
-        let popup = Paragraph::new(summary_line(state))
-            .alignment(Alignment::Center)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(if state.aborted { "Остановлено" } else { "Завершено" })
-                    .border_style(Style::default().fg(if state.aborted { Color::Yellow } else { Color::Green })),
-            );
-        frame.render_widget(popup, popup_area);
-    }
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: ratatui::layout::Rect) -> ratatui::layout::Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(area);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(vertical[1])[1]
-}
-
-fn restore_terminal(mut terminal: Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
-    disable_raw_mode().context("не удалось отключить raw mode")?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen).context("не удалось выйти из альтернативного экрана")?;
-    terminal.show_cursor().context("не удалось показать курсор")?;
-    Ok(())
-}
-
-fn summary_line(state: &SessionState) -> String {
-    if state.aborted {
-        format!("Остановлено. Прогресс: {}/{}", state.mastered, state.total)
-    } else {
-        format!("Готово. Пройдено вопросов: {}/{}", state.mastered, state.total)
     }
 }
