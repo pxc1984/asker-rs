@@ -1,14 +1,14 @@
 ## asker-rs
 
-Terminal trainer for exam preparation with questions and answers stored in a single YAML bank.
+Терминальный тренажер для подготовки к экзаменам с вопросами и ответами в едином YAML-банке.
 
-### Run
+### Запуск
 
 ```bash
 cargo run -- study
 ```
 
-### Commands
+### Команды
 
 ```bash
 cargo run -- study --bank exam_bank.yaml --deck portfolio-theory
@@ -17,18 +17,18 @@ cargo run -- convert --input legacy_questions.txt --output exam_bank.yaml
 cargo run -- build --profile release
 ```
 
-### Build binary
+### Сборка бинарного файла
 
 ```bash
 cargo build --release
 ./target/release/asker-rs study
 ```
 
-### Flow
+### Логика работы
 
-The training flow matches the previous app:
+Поток тренировки совпадает с предыдущим приложением:
 
-- `1` show answer
-- `2` I know
-- `3` I don't know
-- `q` quit
+- `1` показать ответ
+- `2` знаю
+- `3` не знаю
+- `q` выйти

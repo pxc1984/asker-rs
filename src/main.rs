@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_BANK_PATH: &str = "exam_bank.yaml";
 
 #[derive(Parser)]
-#[command(author, version, about = "Unified exam preparation trainer")]
+#[command(author, version, about = "Единый тренажер для подготовки к экзаменам")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -28,30 +28,34 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(about = "Запустить тренировку по вопросам")]
     Study {
         #[arg(short, long, default_value = DEFAULT_BANK_PATH)]
         bank: PathBuf,
         #[arg(short, long)]
         deck: Option<String>,
     },
+    #[command(about = "Показать доступные колоды")]
     List {
         #[arg(short, long, default_value = DEFAULT_BANK_PATH)]
         bank: PathBuf,
     },
+    #[command(about = "Конвертировать старый формат вопросов в YAML")]
     Convert {
         #[arg(short, long)]
         input: PathBuf,
         #[arg(short, long, default_value = DEFAULT_BANK_PATH)]
         output: PathBuf,
-        #[arg(short, long, default_value = "Project Defense")]
+        #[arg(short, long, default_value = "Подготовка к защите проекта")]
         title: String,
-        #[arg(long, default_value = "general")]
+        #[arg(long, default_value = "obshchee")]
         deck_id: String,
-        #[arg(long, default_value = "General")]
+        #[arg(long, default_value = "Общая")]
         deck_name: String,
     },
+    #[command(about = "Собрать бинарный файл")]
     Build {
-        #[arg(long, default_value = "release")]
+        #[arg(long, default_value = "release", help = "Профиль сборки: debug или release")]
         profile: String,
     },
 }
@@ -102,7 +106,7 @@ struct SessionState {
 impl SessionState {
     fn new(mut cards: Vec<SessionCard>) -> Result<Self> {
         if cards.is_empty() {
-            bail!("question bank is empty");
+            bail!("банк вопросов пуст");
         }
 
         let mut rng = rand::rng();
@@ -187,12 +191,12 @@ fn run_build(profile: &str) -> Result<()> {
     if profile == "release" {
         command.arg("--release");
     } else if profile != "debug" {
-        bail!("unsupported profile '{profile}', use 'debug' or 'release'");
+        bail!("неподдерживаемый профиль '{profile}', используйте 'debug' или 'release'");
     }
 
-    let status = command.status().context("failed to run cargo build")?;
+    let status = command.status().context("не удалось запустить cargo build")?;
     if !status.success() {
-        bail!("cargo build failed with status {status}");
+        bail!("cargo build завершился с кодом {status}");
     }
 
     let binary = if profile == "release" {
@@ -200,7 +204,7 @@ fn run_build(profile: &str) -> Result<()> {
     } else {
         "target/debug/asker-rs"
     };
-    println!("Built {binary}");
+    println!("Собран файл {binary}");
     Ok(())
 }
 
@@ -227,18 +231,18 @@ fn run_list(path: &Path) -> Result<()> {
     let bank = load_bank(path)?;
     println!("{}", bank.title);
     for deck in &bank.decks {
-        println!("- {} ({}) [{} cards]", deck.name, deck.id, deck.cards.len());
+        println!("- {} ({}) [{} карточек]", deck.name, deck.id, deck.cards.len());
     }
     Ok(())
 }
 
 fn run_convert(input: &Path, output: &Path, title: &str, deck_id: &str, deck_name: &str) -> Result<()> {
     let content = fs::read_to_string(input)
-        .with_context(|| format!("failed to read {}", input.display()))?;
+        .with_context(|| format!("не удалось прочитать {}", input.display()))?;
     let cards = parse_legacy_cards(&content);
 
     if cards.is_empty() {
-        bail!("no question-answer pairs found in {}", input.display());
+        bail!("в {} не найдено пар вопрос-ответ", input.display());
     }
 
     let bank = ExamBank {
@@ -250,20 +254,20 @@ fn run_convert(input: &Path, output: &Path, title: &str, deck_id: &str, deck_nam
         }],
     };
 
-    let yaml = serde_yaml::to_string(&bank).context("failed to serialize YAML bank")?;
-    fs::write(output, yaml).with_context(|| format!("failed to write {}", output.display()))?;
-    println!("Wrote {}", output.display());
+    let yaml = serde_yaml::to_string(&bank).context("не удалось сериализовать YAML-банк")?;
+    fs::write(output, yaml).with_context(|| format!("не удалось записать {}", output.display()))?;
+    println!("Файл {} записан", output.display());
     Ok(())
 }
 
 fn load_bank(path: &Path) -> Result<ExamBank> {
     let content = fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+        .with_context(|| format!("не удалось прочитать {}", path.display()))?;
     let bank: ExamBank = serde_yaml::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+        .with_context(|| format!("не удалось разобрать {}", path.display()))?;
 
     if bank.decks.is_empty() {
-        bail!("{} does not contain any decks", path.display());
+        bail!("{} не содержит ни одной колоды", path.display());
     }
 
     Ok(bank)
@@ -275,12 +279,12 @@ fn select_deck<'a>(bank: &'a ExamBank, deck_id: Option<&str>) -> Result<&'a Deck
             .decks
             .iter()
             .find(|deck| deck.id == deck_id)
-            .with_context(|| format!("deck '{deck_id}' was not found"));
+            .with_context(|| format!("колода '{deck_id}' не найдена"));
     }
 
     bank.decks
         .first()
-        .context("question bank does not contain any decks")
+        .context("банк вопросов не содержит ни одной колоды")
 }
 
 fn parse_legacy_cards(content: &str) -> Vec<Card> {
@@ -313,12 +317,12 @@ fn parse_legacy_cards(content: &str) -> Vec<Card> {
 }
 
 fn run_tui(title: &str, deck_name: &str, state: &mut SessionState) -> Result<String> {
-    enable_raw_mode().context("failed to enable raw mode")?;
+    enable_raw_mode().context("не удалось включить raw mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).context("failed to enter alternate screen")?;
+    execute!(stdout, EnterAlternateScreen).context("не удалось перейти в альтернативный экран")?;
 
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
+    let mut terminal = Terminal::new(backend).context("не удалось инициализировать терминал")?;
 
     let result = session_loop(&mut terminal, title, deck_name, state);
     restore_terminal(terminal)?;
@@ -339,7 +343,7 @@ fn session_loop(
             return Ok(summary_line(state));
         }
 
-        if let Event::Key(key) = event::read().context("failed to read terminal event")? {
+        if let Event::Key(key) = event::read().context("не удалось прочитать событие терминала")? {
             if key.kind != KeyEventKind::Press {
                 continue;
             }
@@ -381,29 +385,29 @@ fn draw_ui(frame: &mut Frame, title: &str, deck_name: &str, state: &SessionState
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            format!("Deck: {deck_name}"),
+            format!("Колода: {deck_name}"),
             Style::default().fg(Color::Yellow),
         )),
         Line::from(vec![
             Span::styled("1", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::raw(" show answer  "),
+            Span::raw(" показать ответ  "),
             Span::styled("2", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw(" know  "),
+            Span::raw(" знаю  "),
             Span::styled("3", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-            Span::raw(" don't know  "),
+            Span::raw(" не знаю  "),
             Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw(" quit"),
+            Span::raw(" выход"),
         ]),
     ]))
     .alignment(Alignment::Center)
-    .block(Block::default().borders(Borders::ALL).title("Trainer").border_style(Style::default().fg(Color::Blue)));
+    .block(Block::default().borders(Borders::ALL).title("Тренажер").border_style(Style::default().fg(Color::Blue)));
     frame.render_widget(header, layout[0]);
 
     let progress = Paragraph::new(Line::from(vec![
-        Span::styled("Progress: ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled("Прогресс: ", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(format!("{}/{}", state.mastered, state.total)),
         Span::raw("    "),
-        Span::styled("Remaining in queue: ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled("Осталось в очереди: ", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(state.remaining().to_string()),
     ]))
     .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
@@ -412,13 +416,13 @@ fn draw_ui(frame: &mut Frame, title: &str, deck_name: &str, state: &SessionState
     let question = state
         .current()
         .map(|card| card.question.as_str())
-        .unwrap_or("All questions completed.");
+        .unwrap_or("Все вопросы пройдены.");
     let question_widget = Paragraph::new(question)
         .wrap(Wrap { trim: true })
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Question")
+                .title("Вопрос")
                 .border_style(Style::default().fg(Color::Magenta)),
         );
     frame.render_widget(question_widget, layout[2]);
@@ -426,7 +430,7 @@ fn draw_ui(frame: &mut Frame, title: &str, deck_name: &str, state: &SessionState
     let answer_text = if state.answer_shown {
         state.current().map(|card| card.answer.as_str()).unwrap_or("")
     } else {
-        "Press 1 to reveal the answer."
+        "Нажмите 1, чтобы показать ответ."
     };
     let answer_style = if state.answer_shown {
         Style::default().fg(Color::Green)
@@ -439,7 +443,7 @@ fn draw_ui(frame: &mut Frame, title: &str, deck_name: &str, state: &SessionState
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Answer")
+                .title("Ответ")
                 .border_style(Style::default().fg(Color::Green)),
         );
     frame.render_widget(answer_widget, layout[3]);
@@ -447,9 +451,9 @@ fn draw_ui(frame: &mut Frame, title: &str, deck_name: &str, state: &SessionState
     let footer_message = if state.finished {
         summary_line(state)
     } else if state.answer_shown {
-        "Press 2 if you know it now, 3 if you still don't, q to quit.".to_string()
+        "Нажмите 2, если теперь знаете ответ, 3 - если все еще не знаете, q - для выхода.".to_string()
     } else {
-        "Press 1 to show the answer, 2 if you know it, 3 if you don't, q to quit.".to_string()
+        "Нажмите 1, чтобы показать ответ, 2 - если знаете, 3 - если не знаете, q - для выхода.".to_string()
     };
     let footer = Paragraph::new(footer_message)
         .alignment(Alignment::Center)
@@ -464,7 +468,7 @@ fn draw_ui(frame: &mut Frame, title: &str, deck_name: &str, state: &SessionState
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(if state.aborted { "Stopped" } else { "Completed" })
+                    .title(if state.aborted { "Остановлено" } else { "Завершено" })
                     .border_style(Style::default().fg(if state.aborted { Color::Yellow } else { Color::Green })),
             );
         frame.render_widget(popup, popup_area);
@@ -492,16 +496,16 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: ratatui::layout::Rect) ->
 }
 
 fn restore_terminal(mut terminal: Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
-    disable_raw_mode().context("failed to disable raw mode")?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen).context("failed to leave alternate screen")?;
-    terminal.show_cursor().context("failed to show cursor")?;
+    disable_raw_mode().context("не удалось отключить raw mode")?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen).context("не удалось выйти из альтернативного экрана")?;
+    terminal.show_cursor().context("не удалось показать курсор")?;
     Ok(())
 }
 
 fn summary_line(state: &SessionState) -> String {
     if state.aborted {
-        format!("Stopped. Progress: {}/{}", state.mastered, state.total)
+        format!("Остановлено. Прогресс: {}/{}", state.mastered, state.total)
     } else {
-        format!("Completed. Reviewed questions: {}/{}", state.mastered, state.total)
+        format!("Готово. Пройдено вопросов: {}/{}", state.mastered, state.total)
     }
 }
