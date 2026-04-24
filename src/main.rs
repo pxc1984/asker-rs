@@ -50,6 +50,10 @@ enum Command {
         #[arg(long, default_value = "General")]
         deck_name: String,
     },
+    Build {
+        #[arg(long, default_value = "release")]
+        profile: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -173,7 +177,31 @@ fn main() -> Result<()> {
             deck_id,
             deck_name,
         } => run_convert(&input, &output, &title, &deck_id, &deck_name),
+        Command::Build { profile } => run_build(&profile),
     }
+}
+
+fn run_build(profile: &str) -> Result<()> {
+    let mut command = std::process::Command::new("cargo");
+    command.arg("build");
+    if profile == "release" {
+        command.arg("--release");
+    } else if profile != "debug" {
+        bail!("unsupported profile '{profile}', use 'debug' or 'release'");
+    }
+
+    let status = command.status().context("failed to run cargo build")?;
+    if !status.success() {
+        bail!("cargo build failed with status {status}");
+    }
+
+    let binary = if profile == "release" {
+        "target/release/asker-rs"
+    } else {
+        "target/debug/asker-rs"
+    };
+    println!("Built {binary}");
+    Ok(())
 }
 
 fn run_study(path: &Path, deck_id: Option<&str>) -> Result<()> {

@@ -14,6 +14,7 @@ cargo run -- study
 cargo run -- study --bank exam_bank.yaml --deck portfolio-theory
 cargo run -- list
 cargo run -- convert --input legacy_questions.txt --output exam_bank.yaml
+cargo run -- build --profile release
 ```
 
 ### Build binary
