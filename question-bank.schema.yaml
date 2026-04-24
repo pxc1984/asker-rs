@@ -1,0 +1,59 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://example.com/schemas/question-bank.schema.yaml"
+title: Question Bank Schema
+description: Schema for question bank YAML files used by this repository.
+type: object
+additionalProperties: false
+required:
+  - title
+  - decks
+properties:
+  title:
+    type: string
+    minLength: 1
+    description: Human-readable title for the full question bank.
+  decks:
+    type: array
+    minItems: 1
+    description: Collection of decks grouped by topic.
+    items:
+      $ref: "#/$defs/deck"
+$defs:
+  deck:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - name
+      - cards
+    properties:
+      id:
+        type: string
+        minLength: 1
+        pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        description: Stable machine-readable identifier, preferably kebab-case.
+      name:
+        type: string
+        minLength: 1
+        description: Human-readable deck name.
+      cards:
+        type: array
+        minItems: 1
+        description: Cards contained in this deck.
+        items:
+          $ref: "#/$defs/card"
+  card:
+    type: object
+    additionalProperties: false
+    required:
+      - question
+      - answer
+    properties:
+      question:
+        type: string
+        minLength: 1
+        description: Prompt shown to the learner.
+      answer:
+        type: string
+        minLength: 1
+        description: Expected answer or explanation.

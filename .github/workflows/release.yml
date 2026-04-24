@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux x64
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Linux binary
+        run: cargo build --release --locked
+
+      - name: Prepare Linux asset
+        run: |
+          mkdir -p dist
+          cp target/release/asker-rs dist/asker-rs-linux-x64
+
+      - name: Upload Linux asset to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/asker-rs-linux-x64
+
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Windows executable
+        run: cargo build --release --locked
+
+      - name: Prepare Windows asset
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path target/release/asker-rs.exe -DestinationPath dist/asker-rs-windows-x64.zip -Force
+
+      - name: Upload Windows asset to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/asker-rs-windows-x64.zip
